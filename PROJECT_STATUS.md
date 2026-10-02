@@ -1,6 +1,6 @@
 # プロジェクト進捗
 
-最終更新：2026-09-25
+最終更新：2026-10-02
 
 ## 研究テーマ
 - 災害ニュースPWAにおける、記事種別ごとの許容鮮度に基づくキャッシュ戦略の評価。
@@ -21,26 +21,30 @@
 - サンプルの許容鮮度：emergency＝60秒、important＝300秒、normal＝3600秒。
 
 ## API設計
-- 実ニュースAPIは使わず、`server/mock-api.js` にモックAPIを実装する（未実装）。
+- 実ニュースAPIは使わず、`server/mock-api.js` にExpressのモックAPIを実装済み（ポート3000）。
 - サンプル記事の項目：`id`、`title`、`category`、`body`、`updatedAt`、`maxStalenessSec`。
-- エンドポイント、応答形式、記事更新の制御方法は未確定。
+- `/api/emergency`、`/api/important`、`/api/articles`、`/api/static-info` が記事配列を返す。記事更新の制御方法は未確定。
 
 ## 通信条件
 - UIの選択肢：normal / mild / severe / unstable。
-- 遅延・失敗率などの数値と再現方法は未確定・未実装。
+- モックAPIに遅延・失敗率を実装済み：normal＝100ms・0%、mild＝1000ms・10%、severe＝3000ms・30%、unstable＝100〜5000ms・30%。`condition` クエリで選択する。乱数の再現方法は未実装。
 - 実験設定は `src/config/experimentConfig.js` に配置する。
 
 ## 現在の進捗
 - Vite設定と依存パッケージを準備済み。
 - `index.html` に戦略・通信条件の選択、取得ボタン、記事表示領域を用意済み。
 - `src/data/sample-news.json` に記事3件を用意済み。JSON構文確認済み。
-- `src/main.js`、`src/app.js`、`src/styles.css` は実質空。記事取得・表示は未実装。
-- Service Worker、鮮度判定、モックAPI、実験設定、ログ、CSV出力は未実装。
-- マニフェスト、README、仕様書は実質空。Vitestとtestスクリプトも未設定。
-- ブラウザでの動作は未確認。Gitは `.git` が存在するもののリポジトリとして認識されず、履歴・差分は未確認。
+- Step 1のローカルJSONによる一覧・詳細表示は完了（ユーザー報告）。今回 `src/app.js` の取得元をモックAPIへ変更。
+- 取得ボタンで選択中の通信条件を付けて `/api/articles` をfetchし、一覧・クリック時の詳細を表示する。取得中はボタンを無効化し、失敗時はエラーを表示して再試行可能にする。
+- `vite.config.js` に `/api` → `http://localhost:3000` の開発用プロキシを追加。
+- Service Worker、キャッシュ戦略、鮮度判定、実験ログ、CSV出力は今回の対象外で未実装。
+- Vitestとtestスクリプトは未設定。`npm run test` は実行したが Missing script: "test" で失敗。依存追加は行っていない。
+- 構文確認および簡易DOMでの一覧・詳細・取得中・HTTPエラー・通信エラー・再試行の確認は通過。実API＋Viteプロキシでnormalの記事取得とsevereの約3.1秒後の503応答を確認。実ブラウザーでの今回の変更確認は未実施。
+- Gitはリポジトリとして認識されており、前回作業でGitHubへのmainのpushを確認済み。
 
 ## 次にやること
-- 次のStep案：サンプル記事の一覧・詳細表示を実装し、ブラウザで確認する。
+- ブラウザーでnormalの一覧・詳細表示、severeの遅延・エラー表示、API停止時のエラーと再試行を確認する。
+- 次の実装Stepはユーザー指示を待つ。Vitest導入・testスクリプト整備は別途承認が必要。
 - 以下のStep番号は本ファイルで整理した案。実装はユーザーの指示を受けて進める。
 
 ## 今後の実装順
