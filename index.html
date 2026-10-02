@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>災害ニュースPWA</title>
+  </head>
+  <body>
+    <main>
+      <h1>災害ニュース</h1>
+
+      <label for="strategy">キャッシュ戦略</label>
+      <select id="strategy">
+        <option value="cache-first">Cache First</option>
+        <option value="network-first">Network First</option>
+        <option value="freshness-aware">Freshness-aware</option>
+      </select>
+
+      <label for="condition">通信条件</label>
+      <select id="condition">
+        <option value="normal">normal</option>
+        <option value="mild">mild</option>
+        <option value="severe">severe</option>
+        <option value="unstable">unstable</option>
+      </select>
+
+      <button id="fetch-news" type="button">ニュースを取得</button>
+
+      <h2>ニュース一覧</h2>
+      <div id="news-list"></div>
+      <div id="article-detail"></div>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
