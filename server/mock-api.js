@@ -49,6 +49,15 @@ app.get('/api/articles', simulateCondition, (req, res) => {
   res.json(articles);
 });
 
+app.get('/api/articles/:id', simulateCondition, (req, res) => {
+  const article = articles.find((item) => String(item.id) === req.params.id);
+  if (!article) {
+    res.status(404).json({ error: 'Article not found' });
+    return;
+  }
+  res.json(article);
+});
+
 app.get('/api/static-info', simulateCondition, (req, res) => {
   res.json(articles.filter((article) => article.category === 'normal'));
 });

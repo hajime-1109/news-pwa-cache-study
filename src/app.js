@@ -10,6 +10,7 @@ export function initApp() {
 
   articleDetail.setAttribute('aria-live', 'polite');
   newsList.setAttribute('aria-live', 'polite');
+  let detailRequestId = 0;
 
   function showDetail(article) {
     const title = document.createElement('h2');
@@ -36,8 +37,29 @@ export function initApp() {
     articleDetail.replaceChildren(title, metadata, body);
   }
 
+  async function fetchDetail(id) {
+    const requestId = ++detailRequestId;
+    const condition = conditionSelect.value;
+    articleDetail.textContent = '記事詳細を取得中です…';
+
+    try {
+      const response = await fetch(`/api/articles/${encodeURIComponent(id)}?condition=${encodeURIComponent(condition)}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const article = await response.json();
+      if (requestId !== detailRequestId) return;
+      showDetail(article);
+    } catch {
+      if (requestId !== detailRequestId) return;
+      articleDetail.textContent = '記事詳細を取得できませんでした。APIサーバーと通信条件を確認し、もう一度記事をクリックしてください。';
+    }
+  }
+
   fetchButton.addEventListener('click', async () => {
     const condition = conditionSelect.value;
+    // 一覧の再取得前に始まった詳細応答は表示しない。
+    detailRequestId += 1;
     fetchButton.disabled = true;
     newsList.textContent = 'ニュースを取得中です…';
     articleDetail.replaceChildren();
@@ -58,7 +80,7 @@ export function initApp() {
         const button = document.createElement('button');
         button.type = 'button';
         button.textContent = article.title;
-        button.addEventListener('click', () => showDetail(article));
+        button.addEventListener('click', () => fetchDetail(article.id));
         item.append(button);
         list.append(item);
       }
