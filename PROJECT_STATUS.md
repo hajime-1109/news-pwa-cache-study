@@ -45,20 +45,22 @@
 - Step 5として `public/sw.js` にCache Firstを追加。同一オリジンでパスが `/api` から始まるGETのみを処理する。
 - `news-api-cache-v1` 内でリクエストを照合し、命中時はキャッシュを返す。未保存時はネットワーク取得し、response.okの場合のみcloneして保存する。クエリ文字列も区別し、一覧・詳細の両方を対象とする。
 - `cache hit` / `network fetch` の確認ログを追加。キャッシュ保存失敗時も取得済みレスポンスは返す。install / activateの既存ログは維持。
-- Step 6：`public/sw.js` にNetwork Firstを追加し、一時固定で適用。Cache First関数は保持。同一オリジンの `/api`・`/api/` 配下へのGETのみを対象とする。
+- Step 6：`public/sw.js` にNetwork Firstを追加。当初は一時固定で適用し、現在はStep 8の選択に従う。Cache First関数は保持。同一オリジンの `/api`・`/api/` 配下へのGETのみを対象とする。
 - Network Firstは毎回fetchを試み、response.okの場合のみcloneして既存キャッシュへ保存・更新する。通信エラーおよび503を含む5xxで同じURL（クエリを含む）のキャッシュへフォールバックする。API停止時にViteが500を返すことを実測済み。404などは保存せずそのまま返す。キャッシュ未命中はHTTPエラーを返すか通信例外を再送出し、既存UIのエラー処理へ渡す。
 - `network success` / `network failed` / `fallback cache hit` / `fallback cache miss` のログを追加。保存に失敗しても取得済みの正常レスポンスは返す。skipWaitingとclients.claimを追加し、更新SWの有効化とクライアント制御を要求する。
 - Step 6の構文確認・Node模擬検証は通過：一覧・詳細のネットワーク優先、キャッシュ更新、通信エラー・503・500での命中と未命中、404非保存、保存失敗時の応答維持、対象外URL・メソッドの除外、ライフサイクルとログ。
 - `npm run dev` と `node server/mock-api.js` の起動、画面・更新済みsw.js・一覧/詳細APIの200応答を確認。Viteはサンドボックスの読み取り制限で初回起動に失敗したため、権限付きで再実行して確認。確認用プロセスは終了済み。
 - Step 6のネットワーク失敗時のキャッシュへのフォールバックは確認済み（Step 7依頼時のユーザー報告）。`npm run test` はtestスクリプト未設定で失敗。新規ライブラリは追加していない。
 - Step 7：`src/config/experimentConfig.js` にAPI別許容鮮度、`src/cache/stalenessPolicy.js` に経過秒数と鮮度判定を追加。`cacheAgeSec <= maxStalenessSec`（境界を含む）で新鮮と判断する。保存時刻が欠落・不正・未来の場合や未知のAPIは新鮮と判断しない。
-- `public/sw.js` に独立したfreshnessAware関数を追加して一時固定。既存cacheFirst・networkFirstは保持。3戦略の正常なネットワーク取得後の保存処理を共通化し、キャッシュレスポンスの `X-Cache-Saved-At` ヘッダーへDate.now()を記録する。キャッシュ利用のみでは更新しない。
+- `public/sw.js` に独立したfreshnessAware関数を追加。当初の一時固定から、現在はStep 8の選択に従う。既存cacheFirst・networkFirstは保持。3戦略の正常なネットワーク取得後の保存処理を共通化し、キャッシュレスポンスの `X-Cache-Saved-At` ヘッダーへDate.now()を記録する。キャッシュ利用のみでは更新しない。
 - 新鮮なキャッシュは通信せず返す。期限超過・鮮度不明・未保存はネットワーク取得を試み、成功時に本文と保存時刻を更新する。通信エラー・503を含む5xxで古いキャッシュがあれば返す。404などは保存せず通常のエラーとして返す。キャッシュも利用できない場合は既存画面のエラー処理へ渡す。
 - 指定の6種類のfreshnessログを追加。古いキャッシュを返す場合は経過秒数（不明時unknown）・許容鮮度・stalenessViolationをConsoleに表示し、返却レスポンスだけに警告用ヘッダーを付加する。`src/app.js` は一覧・詳細それぞれに簡単な注意を表示し、正常取得や再取得時に古い注意を解除する。実験ログの永続記録は行わない。
 - `src/main.js` のSW登録をmodule形式へ変更。`vite.config.js` はビルド時にSWが参照する設定・判定モジュールを同じパスへ出力する。新規ライブラリは追加していない。
 - Step 7の構文・差分確認、Viteビルド、Node模擬検証は通過：5種類のAPIの指定閾値・境界、保存と更新、通信なしの命中、Worker再作成後の時刻維持、503/500/通信失敗時の警告付きフォールバック、404非保存、未保存時の失敗、時刻欠落・不正・未来、キャッシュ保存/読み取り失敗、既存2戦略の維持、対象外リクエスト除外、指定ログ。一覧・詳細の警告表示/解除とエラー表示は簡易DOMでも検証済み。
 - Step 7の実ブラウザーでのSW更新・再起動、Cache Storageの保存時刻、一覧・詳細の警告表示は未確認。`npm run test` は今回もtestスクリプト未設定で失敗。模擬検証を実ブラウザー確認の代わりに完了扱いにはしない。
-- Step 8：ユーザーの追加依頼により、既存の戦略プルダウンを取得処理へ接続。Cache First / Network First / Freshness Firstを選べる。Freshness Firstの内部値を `freshness-aware` に統一し、既存freshnessAware関数へ対応させる。新しいボタンやCSSは追加していない。
+- Step 8：ユーザーの追加依頼により、既存の戦略プルダウンを取得処理へ接続。Cache First / Network First / Freshness Awareを選べる。内部値 `freshness-aware` は既存freshnessAware関数へ対応する。新しいボタンやCSSは追加していない。
+- 2026-10-16のコード再確認で、`index.html` の表示名もFreshness Awareに統一されていることを確認。HTMLのvalueは内部識別子、optionの本文は画面表示名として区別する。画面の初期選択は先頭のCache First。
+- 鮮度を調整するファイルは `src/config/experimentConfig.js`、判定処理は `src/cache/stalenessPolicy.js`。現設定は指定どおり60・600・1800・86400秒で、検証用の5秒設定には変更されていない。
 - 一覧・詳細の取得時に選択値を `X-Cache-Strategy` ヘッダーでSWへ渡し、SWが3つの独立した関数から選択する。ヘッダーはAPI取得・キャッシュ照合の前に取り除き、同じURLのキャッシュを共有する。リクエストごとの指定なのでWorker再起動や別タブの選択に依存しない。指定なしはFreshness Aware、無効値は400を返す。
 - 戦略変更時は前の一覧・詳細表示をクリアし、取得中だった古い応答を無視する。SWがページを制御していない間は取得せず、再試行・再読み込みを案内する。
 - Step 8の構文・差分確認、Viteビルド、Node模擬検証は通過：一覧/詳細の3戦略切り替え、共有キャッシュ、Network Firstの通信優先、Freshness Awareの新鮮キャッシュ利用、無効値の拒否、APIへの戦略ヘッダー非送信、UI選択値の反映、切り替え前応答の無視、SW未制御時の案内。実ブラウザーでの操作は未確認。`npm run test` はtestスクリプト未設定で失敗。
