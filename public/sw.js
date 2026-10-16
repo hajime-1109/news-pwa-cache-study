@@ -1,3 +1,5 @@
+import { judgeCacheFreshness } from '/src/cache/stalenessPolicy.js';
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (
@@ -8,11 +10,38 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Step 6の検証中はNetwork Firstに固定する。
-  event.respondWith(networkFirst(event.request));
+  const strategyName = event.request.headers.get('X-Cache-Strategy') ?? 'freshness-aware';
+  const strategies = {
+    'cache-first': cacheFirst,
+    'network-first': networkFirst,
+    'freshness-aware': freshnessAware,
+  };
+  if (!Object.hasOwn(strategies, strategyName)) {
+    event.respondWith(Promise.resolve(new Response('Unknown cache strategy', { status: 400 })));
+    return;
+  }
+
+  // 選択はリクエスト単位で適用する。APIやキャッシュキーには持ち込まない。
+  const headers = new Headers(event.request.headers);
+  headers.delete('X-Cache-Strategy');
+  const request = new Request(event.request, { headers });
+  console.log('cache strategy:', strategyName, request.url);
+  event.respondWith(strategies[strategyName](request));
 });
 
 const API_CACHE_NAME = 'news-api-cache-v1';
+const SAVED_AT_HEADER = 'X-Cache-Saved-At';
+
+async function saveResponse(cache, request, response) {
+  const copy = response.clone();
+  const headers = new Headers(copy.headers);
+  headers.set(SAVED_AT_HEADER, String(Date.now()));
+  await cache.put(request, new Response(copy.body, {
+    status: copy.status,
+    statusText: copy.statusText,
+    headers,
+  }));
+}
 
 async function cacheFirst(request) {
   const cache = await caches.open(API_CACHE_NAME);
@@ -26,7 +55,7 @@ async function cacheFirst(request) {
   const response = await fetch(request);
   if (response.ok) {
     try {
-      await cache.put(request, response.clone());
+      await saveResponse(cache, request, response);
     } catch (error) {
       // 保存できなくても、取得済みの記事は画面に返す。
       console.error('Cache save failed:', error);
@@ -48,7 +77,7 @@ async function networkFirst(request) {
     console.log('network success:', request.url);
     try {
       const cache = await caches.open(API_CACHE_NAME);
-      await cache.put(request, response.clone());
+      await saveResponse(cache, request, response);
     } catch (error) {
       // 保存失敗を通信失敗と混同せず、取得済みの記事を返す。
       console.error('Cache save failed:', error);
@@ -78,6 +107,74 @@ async function networkFirst(request) {
   if (response) {
     return response;
   }
+  throw networkError;
+}
+
+async function freshnessAware(request) {
+  const pathname = new URL(request.url).pathname;
+  let cache;
+  let cachedResponse;
+  try {
+    cache = await caches.open(API_CACHE_NAME);
+    cachedResponse = await cache.match(request);
+  } catch (error) {
+    console.error('Cache read failed:', error);
+  }
+
+  if (cachedResponse) {
+    const freshness = judgeCacheFreshness(pathname, cachedResponse.headers.get(SAVED_AT_HEADER));
+    if (freshness.isFresh) {
+      console.log('freshness cache hit:', request.url, freshness);
+      return cachedResponse;
+    }
+    console.log('freshness cache expired:', request.url, freshness);
+  } else {
+    console.log('freshness cache miss:', request.url);
+  }
+
+  let response;
+  let networkError;
+  try {
+    response = await fetch(request);
+  } catch (error) {
+    networkError = error;
+  }
+
+  if (response?.ok) {
+    console.log('freshness network success:', request.url);
+    try {
+      cache ??= await caches.open(API_CACHE_NAME);
+      await saveResponse(cache, request, response);
+    } catch (error) {
+      console.error('Cache save failed:', error);
+    }
+    return response;
+  }
+
+  console.log('freshness network failed:', request.url, response?.status ?? networkError);
+  // 404などはキャッシュで隠さない。通信エラー・503を含む5xxのみ救済する。
+  if (response && response.status < 500) return response;
+
+  if (cachedResponse) {
+    const freshness = judgeCacheFreshness(pathname, cachedResponse.headers.get(SAVED_AT_HEADER));
+    console.warn('freshness fallback stale cache:', request.url, {
+      cacheAgeSec: freshness.cacheAgeSec ?? 'unknown',
+      maxStalenessSec: freshness.maxStalenessSec ?? 'unknown',
+      stalenessViolation: true,
+    });
+    // 警告は今回返すレスポンスだけに付加し、キャッシュや保存時刻は変更しない。
+    const headers = new Headers(cachedResponse.headers);
+    headers.set('X-Cache-Stale', 'true');
+    headers.set('X-Cache-Age-Sec', String(freshness.cacheAgeSec ?? 'unknown'));
+    headers.set('X-Cache-Max-Staleness-Sec', String(freshness.maxStalenessSec ?? 'unknown'));
+    return new Response(cachedResponse.body, {
+      status: cachedResponse.status,
+      statusText: cachedResponse.statusText,
+      headers,
+    });
+  }
+
+  if (response) return response;
   throw networkError;
 }
 
