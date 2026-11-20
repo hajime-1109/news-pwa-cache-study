@@ -34,6 +34,18 @@
       </select>
 
       <button id="fetch-news" type="button">ニュースを取得</button>
+      <div>
+        <label for="cache-state">初期キャッシュ状態</label>
+        <select id="cache-state">
+          <option value="cold">Cold</option>
+          <option value="fresh">Fresh</option>
+          <option value="expired">Expired</option>
+        </select>
+        <button id="prepare-cache" type="button">キャッシュを初期化</button>
+        <span id="cache-status" role="status"></span>
+      </div>
+      <button id="export-csv" type="button">実験ログをCSVで保存</button>
+      <span id="export-status" role="status"></span>
 
       <h2>ニュース一覧</h2>
       <div id="news-list"></div>

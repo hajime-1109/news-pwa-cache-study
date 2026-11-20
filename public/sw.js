@@ -1,4 +1,7 @@
-import { judgeCacheFreshness } from '/src/cache/stalenessPolicy.js';
+import { getMaxStalenessSec, judgeCacheFreshness } from '/src/cache/stalenessPolicy.js';
+
+let activeRequests = 0;
+let preparingCache = false;
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
@@ -25,8 +28,13 @@ self.addEventListener('fetch', (event) => {
   const headers = new Headers(event.request.headers);
   headers.delete('X-Cache-Strategy');
   const request = new Request(event.request, { headers });
+  if (preparingCache) {
+    event.respondWith(new Response('Cache preparation in progress', { status: 503 }));
+    return;
+  }
   console.log('cache strategy:', strategyName, request.url);
-  event.respondWith(strategies[strategyName](request));
+  activeRequests += 1;
+  event.respondWith(strategies[strategyName](request).finally(() => { activeRequests -= 1; }));
 });
 
 const API_CACHE_NAME = 'news-api-cache-v1';
@@ -43,15 +51,94 @@ function withResponseSource(response, source) {
   });
 }
 
-async function saveResponse(cache, request, response) {
+async function saveResponse(cache, request, response, savedAt = Date.now()) {
   const copy = response.clone();
   const headers = new Headers(copy.headers);
-  headers.set(SAVED_AT_HEADER, String(Date.now()));
+  headers.set(SAVED_AT_HEADER, String(savedAt));
   await cache.put(request, new Response(copy.body, {
     status: copy.status,
     statusText: copy.statusText,
     headers,
   }));
+}
+
+self.addEventListener('message', (event) => {
+  const port = event.ports[0];
+  if (event.data?.type !== 'prepare-cache' || !port) return;
+  if (preparingCache || activeRequests > 0) {
+    port.postMessage({ ok: false, error: '別の取得または初期化が進行中です。' });
+    port.close();
+    return;
+  }
+  preparingCache = true;
+  event.waitUntil((async () => {
+    try {
+      const result = await prepareCache(event.data);
+      port.postMessage({ ok: true, ...result });
+    } catch (error) {
+      port.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      preparingCache = false;
+      port.close();
+    }
+  })());
+});
+
+async function prepareCache({ apiPath, condition, state }) {
+  const maxAge = getMaxStalenessSec(apiPath);
+  const ageMultiplier = { fresh: 0.5, expired: 1.5 };
+  if (maxAge === null || apiPath.split('/').length !== 3
+      || !['normal', 'mild', 'severe', 'unstable'].includes(condition)
+      || (state !== 'cold' && !Object.hasOwn(ageMultiplier, state))) {
+    throw new Error('初期化条件が不正です。');
+  }
+
+  await caches.delete(API_CACHE_NAME);
+  if (await caches.has(API_CACHE_NAME)) throw new Error('実験用キャッシュを削除できませんでした。');
+  if (state === 'cold') return { configuredAgeSec: null, paths: [] };
+
+  try {
+    const urlFor = (path, networkCondition) =>
+      new URL(`${path}?condition=${networkCondition}`, self.location.origin);
+    const signal = AbortSignal.timeout(10000);
+    const fetchNormal = async (path) => {
+      const response = await fetch(urlFor(path, 'normal'), { cache: 'no-store', signal });
+      if (!response.ok) throw new Error(`準備用APIの取得に失敗しました (HTTP ${response.status})。`);
+      return response;
+    };
+    const list = await fetchNormal(apiPath);
+    const articles = await list.clone().json();
+    if (!Array.isArray(articles) || articles.length === 0) throw new Error('準備対象の記事がありません。');
+    const paths = [apiPath];
+    const responses = [list];
+    for (const article of articles) {
+      if (typeof article?.id !== 'string' || !article.id || ['.', '..'].includes(article.id)) {
+        throw new Error('準備対象の記事IDが不正です。');
+      }
+      const path = `${apiPath}/${encodeURIComponent(article.id)}`;
+      const response = await fetchNormal(path);
+      const detail = await response.clone().json();
+      if (detail?.id !== article.id) throw new Error('準備対象の記事詳細が一致しません。');
+      paths.push(path);
+      responses.push(response);
+    }
+    const configuredAgeSec = maxAge * ageMultiplier[state];
+    const cache = await caches.open(API_CACHE_NAME);
+    const savedAt = Date.now() - configuredAgeSec * 1000;
+    for (const [index, path] of paths.entries()) {
+      const key = new Request(urlFor(path, condition));
+      await saveResponse(cache, key, responses[index], savedAt);
+      const stored = await cache.match(key);
+      if (stored?.headers.get(SAVED_AT_HEADER) !== String(savedAt)) {
+        throw new Error('初期化後のキャッシュを確認できませんでした。');
+      }
+    }
+    return { configuredAgeSec, paths };
+  } catch (error) {
+    await caches.delete(API_CACHE_NAME);
+    if (await caches.has(API_CACHE_NAME)) throw new Error('初期化に失敗し、キャッシュも削除できませんでした。');
+    throw error;
+  }
 }
 
 async function cacheFirst(request) {

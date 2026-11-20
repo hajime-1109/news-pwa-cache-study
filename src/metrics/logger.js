@@ -15,6 +15,8 @@ import { judgeCacheFreshness } from '../cache/stalenessPolicy.js';
  * @property {number|null} maxStalenessSec
  * @property {boolean|null} stalenessViolation
  * @property {string|null} error
+ * @property {'cold'|'fresh'|'expired'|null} [initialCacheState]
+ * @property {number|null} [configuredAgeSec]
  */
 
 /** @type {Readonly<ExperimentLog>[]} */
@@ -31,7 +33,7 @@ export function getLogs() {
 }
 
 /**
- * @param {{apiPath: string, requestType: 'list'|'detail', strategy: string, condition: string}} context
+ * @param {Pick<ExperimentLog, 'apiPath'|'requestType'|'strategy'|'condition'|'initialCacheState'|'configuredAgeSec'>} context
  */
 export function startMeasurement(context) {
   const startedAt = performance.now();

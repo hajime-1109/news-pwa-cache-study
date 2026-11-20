@@ -1,22 +1,126 @@
 import { getMaxStalenessSec } from './cache/stalenessPolicy.js';
-import { startMeasurement } from './metrics/logger.js';
+import { downloadCsv } from './metrics/exportCsv.js';
+import { getLogs, startMeasurement } from './metrics/logger.js';
+
+function requestCachePreparation(worker, settings) {
+  return new Promise((resolve, reject) => {
+    const channel = new MessageChannel();
+    const timeout = setTimeout(() => {
+      channel.port1.close();
+      reject(new Error('Service Workerから応答がありません。ページを再読み込みしてください。'));
+    }, 15000);
+    channel.port1.onmessage = ({ data }) => {
+      clearTimeout(timeout);
+      channel.port1.close();
+      if (data.ok) resolve(data);
+      else reject(new Error(data.error));
+    };
+    try {
+      worker.postMessage({ type: 'prepare-cache', ...settings }, [channel.port2]);
+    } catch (error) {
+      clearTimeout(timeout);
+      channel.port1.close();
+      channel.port2.close();
+      reject(error);
+    }
+  });
+}
 
 export function initApp() {
   const fetchButton = document.getElementById('fetch-news');
+  const exportButton = document.getElementById('export-csv');
+  const exportStatus = document.getElementById('export-status');
+  const cacheStateSelect = document.getElementById('cache-state');
+  const prepareButton = document.getElementById('prepare-cache');
+  const cacheStatus = document.getElementById('cache-status');
   const conditionSelect = document.getElementById('condition');
   const strategySelect = document.getElementById('strategy');
   const apiSelect = document.getElementById('api-type');
   const newsList = document.getElementById('news-list');
   const articleDetail = document.getElementById('article-detail');
 
-  if (!fetchButton || !conditionSelect || !strategySelect || !apiSelect || !newsList || !articleDetail) {
-    throw new Error('記事表示に必要なHTML要素が見つかりません。');
+  if (!fetchButton || !exportButton || !exportStatus || !cacheStateSelect || !prepareButton || !cacheStatus
+    || !conditionSelect || !strategySelect || !apiSelect || !newsList || !articleDetail) {
+    throw new Error('画面に必要なHTML要素が見つかりません。');
   }
+
+  exportButton.addEventListener('click', () => {
+    const logs = getLogs();
+    if (logs.length === 0) {
+      exportStatus.textContent = '保存できる実験ログがありません。';
+      return;
+    }
+    downloadCsv(logs);
+    exportStatus.textContent = `${logs.length}件のCSVダウンロードを開始しました。`;
+  });
 
   articleDetail.setAttribute('aria-live', 'polite');
   newsList.setAttribute('aria-live', 'polite');
   let detailRequestId = 0;
   let listRequestId = 0;
+  let activeMeasurements = 0;
+  let preparingCache = false;
+  let preparedCache = null;
+  const measuredPaths = new Set();
+
+  prepareButton.addEventListener('click', async () => {
+    if (preparingCache || activeMeasurements > 0) return;
+    const worker = navigator.serviceWorker?.controller;
+    if (!worker) {
+      cacheStatus.textContent = 'Service Workerの準備後にもう一度お試しください。';
+      return;
+    }
+    const apiPath = apiSelect.value;
+    const condition = conditionSelect.value;
+    const state = cacheStateSelect.value;
+    const apiLabel = apiSelect.selectedOptions[0].textContent;
+    const stateLabel = cacheStateSelect.selectedOptions[0].textContent;
+    preparingCache = true;
+    preparedCache = null;
+    measuredPaths.clear();
+    const controls = [apiSelect, conditionSelect, strategySelect, cacheStateSelect, fetchButton, prepareButton];
+    controls.forEach((control) => { control.disabled = true; });
+    newsList.inert = true;
+    cacheStatus.textContent = 'キャッシュを初期化しています…';
+    try {
+      const { configuredAgeSec, paths } = await requestCachePreparation(worker, { apiPath, condition, state });
+      preparedCache = { apiPath, condition, state, configuredAgeSec, paths };
+      const age = configuredAgeSec === null ? '' : `（設定経過時間${configuredAgeSec}秒）`;
+      cacheStatus.textContent = `初期化完了：${apiLabel} / ${condition} / ${stateLabel}${age}`;
+    } catch (error) {
+      cacheStatus.textContent = `初期化に失敗しました：${error.message}`;
+    } finally {
+      preparingCache = false;
+      controls.forEach((control) => { control.disabled = false; });
+      newsList.inert = false;
+    }
+  });
+
+  function beginMeasurement(context) {
+    const { apiPath, condition } = context;
+    const applies = preparedCache?.condition === condition && (
+      preparedCache.state === 'cold'
+        ? apiPath === preparedCache.apiPath || apiPath.startsWith(`${preparedCache.apiPath}/`)
+        : preparedCache.paths.includes(apiPath)
+    );
+    const firstForKey = applies && !measuredPaths.has(apiPath);
+    if (firstForKey) measuredPaths.add(apiPath);
+    const finish = startMeasurement({
+      ...context,
+      initialCacheState: firstForKey ? preparedCache.state : null,
+      configuredAgeSec: firstForKey ? preparedCache.configuredAgeSec : null,
+    });
+    activeMeasurements += 1;
+    prepareButton.disabled = true;
+    return (outcome, response, error) => {
+      try {
+        finish(outcome, response, error);
+      } finally {
+        activeMeasurements -= 1;
+        prepareButton.disabled = activeMeasurements > 0;
+      }
+    };
+  }
 
   strategySelect.addEventListener('change', () => {
     // 前の戦略で取得中だった応答は表示しない。
@@ -77,10 +181,11 @@ export function initApp() {
   }
 
   async function fetchDetail(id, apiPath) {
+    if (preparingCache) return;
     const strategy = strategySelect.value;
     const condition = conditionSelect.value;
     const pathname = `${apiPath}/${encodeURIComponent(id)}`;
-    const finish = startMeasurement({ apiPath: pathname, requestType: 'detail', strategy, condition });
+    const finish = beginMeasurement({ apiPath: pathname, requestType: 'detail', strategy, condition });
     let response;
     let outcome = 'failure';
     let requestError = null;
@@ -110,10 +215,11 @@ export function initApp() {
   }
 
   fetchButton.addEventListener('click', async () => {
+    if (preparingCache) return;
     const strategy = strategySelect.value;
     const condition = conditionSelect.value;
     const apiPath = apiSelect.value;
-    const finish = startMeasurement({ apiPath, requestType: 'list', strategy, condition });
+    const finish = beginMeasurement({ apiPath, requestType: 'list', strategy, condition });
     let response;
     let outcome = 'failure';
     let requestError = null;
