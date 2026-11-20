@@ -1,9 +1,9 @@
 # プロジェクト進捗
 
-最終更新：2026-10-16
+最終更新：2026-11-13
 
 ## 研究テーマ
-- 災害ニュースPWAにおける、記事種別ごとの許容鮮度に基づくキャッシュ戦略の評価。
+- ニュースPWAにおけるAPI種別と許容鮮度に基づくキャッシュ戦略カスタマイズの性能評価。
 
 ## 研究目的
 - 表示速度・取得成功・情報鮮度のバランスを改善できるか検証する。
@@ -18,15 +18,15 @@
 - cache-first
 - network-first
 - freshness-aware：Step 7ではユーザー指定により、API種別ごとの許容鮮度とキャッシュ保存時刻で利用を判断する。期限超過・鮮度不明でも通信失敗時は警告付きで返す。記事自体の更新時刻に基づく鮮度とは区別する。
-- api-custom：API種別ごとに戦略を変える本命方式（Step 9で実装予定）。APIと戦略の対応は実装時に確定する。
-- 記事JSONのサンプル値はemergency＝60秒、important＝300秒、normal＝3600秒のまま維持。Step 7のキャッシュ判定ではこの値やupdatedAtを使用しない。
-- Step 7のAPI別許容鮮度：`/api/emergency`＝60秒、`/api/important`＝600秒、`/api/articles`と記事詳細＝1800秒、`/api/static-info`＝86400秒。pathnameで判定し、クエリには依存しない。
+- api-custom：API種別ごとに戦略を変える本命方式。今回のStep 9には含めず、実装時期・対応戦略は今後の指示で確定する。
+- 記事JSONはmaxStalenessSecを持たない。キャッシュ鮮度はAPI別許容時間と保存時刻から判断し、updatedAtは使用しない。
+- API別許容鮮度：`/api/emergency`＝60秒、`/api/important`＝600秒、`/api/articles`＝1800秒、`/api/static-info`＝86400秒。一覧・各API配下の詳細ともpathnameで判定し、クエリには依存しない。
 
 ## API設計
 - 実ニュースAPIは使わず、`server/mock-api.js` にExpressのモックAPIを実装済み（ポート3000）。
-- サンプル記事の項目：`id`、`title`、`category`、`body`、`updatedAt`、`maxStalenessSec`。
-- `/api/emergency`、`/api/important`、`/api/articles`、`/api/static-info` が記事配列を返す。記事更新の制御方法は未確定。
-- `/api/articles/:id` は通信条件を適用し、IDが一致する記事1件を返す。存在しないIDは404と `{ "error": "Article not found" }` を返す。
+- サンプル記事の項目：`id`、`title`、`category`、`body`、`updatedAt`。
+- `/api/emergency`、`/api/important`、`/api/articles`、`/api/static-info` が、それぞれemergency・important・normal・static-infoの記事配列を各1件、重複なしで返す。記事更新の制御方法は未確定。
+- 各APIの `/:id` は通信条件を適用し、そのAPIの分類とIDが一致する記事を返す。不存在・別分類IDは404と `{ "error": "Article not found" }` を返す。
 
 ## 通信条件
 - UIの選択肢：normal / mild / severe / unstable。
@@ -35,10 +35,10 @@
 
 ## 現在の進捗
 - Vite設定と依存パッケージを準備済み。
-- `index.html` に戦略・通信条件の選択、取得ボタン、記事表示領域を用意済み。
-- `src/data/sample-news.json` に記事3件を用意済み。JSON構文確認済み。
+- `index.html` にAPI種別・戦略・通信条件の選択、取得ボタン、記事表示領域を用意済み。
+- `src/data/sample-news.json` に4分類の記事4件を用意済み。既存ID news-001〜003を維持し、通常ニュースnews-004を追加。防災用品はstatic-infoへ分類。
 - Step 1〜3は完了。Step 3のブラウザー確認も完了（ユーザー報告）。
-- 一覧取得は `/api/articles?condition=...` を維持。Step 3.5としてクリック時に選択中の通信条件で詳細APIをfetchし、取得中・成功・失敗を表示する処理を追加。連続クリックと一覧再取得時は古い詳細応答を無視する。
+- 一覧取得はStep 9で選択APIへ変更。クリック時に選択中の通信条件で同じAPI種別の詳細をfetchし、取得中・成功・失敗を表示する。連続クリック・一覧再取得・API切り替え時は古い詳細応答を無視する。
 - Step 3.5は完了（ユーザー報告）。記事IDは既存の `news-001`〜`news-003` を維持しており、詳細確認にはこれらのIDを使用する。
 - `vite.config.js` に `/api` → `http://localhost:3000` の開発用プロキシを追加。
 - Step 4として `src/main.js` にService Worker対応判定と `/sw.js` の登録を追加。成功はconsole.log、失敗はconsole.errorで表示する。
@@ -64,7 +64,7 @@
 - 一覧・詳細の取得時に選択値を `X-Cache-Strategy` ヘッダーでSWへ渡し、SWが3つの独立した関数から選択する。ヘッダーはAPI取得・キャッシュ照合の前に取り除き、同じURLのキャッシュを共有する。リクエストごとの指定なのでWorker再起動や別タブの選択に依存しない。指定なしはFreshness Aware、無効値は400を返す。
 - 戦略変更時は前の一覧・詳細表示をクリアし、取得中だった古い応答を無視する。SWがページを制御していない間は取得せず、再試行・再読み込みを案内する。
 - Step 8の構文・差分確認、Viteビルド、Node模擬検証は通過：一覧/詳細の3戦略切り替え、共有キャッシュ、Network Firstの通信優先、Freshness Awareの新鮮キャッシュ利用、無効値の拒否、APIへの戦略ヘッダー非送信、UI選択値の反映、切り替え前応答の無視、SW未制御時の案内。実ブラウザーでの操作は未確認。`npm run test` はtestスクリプト未設定で失敗。
-- api-custom、実験ログ、CSV出力は未実装。
+- api-custom、CSV出力は未実装。実験ログはStep 10でメモリー内への記録を実装済み。
 - Step 5の構文確認とNodeによる模擬検証は通過：一覧・詳細の初回取得とキャッシュ命中、オフライン時の命中、クエリ区別、404/503を保存しないこと、対象外リクエストの除外、未保存時の通信失敗、保存失敗時の応答維持。起動中のVite経由で更新済みsw.jsの配信と一覧・詳細APIの200応答を確認。
 - Step 5はブラウザーでの動作確認まで完了（2026-10-09、ユーザー報告）。API停止後も取得済みの記事は読み込め、未取得の記事は読み込めないことを確認。これはAPI停止時の確認であり、画面自体の完全オフライン起動を確認したものではない。
 - Step 4の構文確認と登録成功・失敗・非対応時の模擬検証は通過。`npm run dev` の起動、`/sw.js` のJavaScript配信、Vite経由の一覧・詳細APIの200応答を確認。確認用Viteは終了済み。
@@ -73,8 +73,37 @@
 - Step 3.5の構文・差分チェック、簡易DOMでの一覧・詳細URL・取得中・成功・404/503・通信エラー・再試行・応答競合の検証は通過。実APIで既存IDの詳細JSON、一覧、404のJSON、severeの約3.06秒後の200応答を確認。`npm run dev` の起動を確認し、検証用プロセスは終了。エージェントによる実ブラウザー確認は未実施だが、ユーザーから完了報告を受領済み。
 - Gitはリポジトリとして認識されており、前回作業でGitHubへのmainのpushを確認済み。
 
+## Step 9（2026-11-13）
+- 変更：src/data/sample-news.json、server/mock-api.js、index.html、src/app.js、src/cache/stalenessPolicy.js、PROJECT_STATUS.md。
+- 実HTTP確認：emergency＝news-001、important＝news-002、articles＝news-004、static-info＝news-003。各一覧1件・詳細200・不存在ID404。確認用HTTPサーバーは終了済み。
+- Node模擬検証：全APIの別分類ID404、通信条件4種類の遅延・失敗分岐、一覧・詳細の60 / 600 / 1800 / 86400秒と境界判定が通過。
+- UI模擬検証：選択APIの一覧・詳細URL、conditionとX-Cache-Strategy、URLに基づく許容鮮度表示、警告、切り替え前の一覧・詳細応答の無視が通過。undefined表示なし。詳細の通信条件はクリック時の選択値。
+- SW模擬検証：全APIの一覧・詳細で3戦略、共有キャッシュ、保存時刻、期限超過後の503フォールバックと警告ヘッダーが通過。public/sw.js・experimentConfig.js・通信条件の設定値は変更なし。
+- Viteビルド成功。初回はサンドボックスの設定読込制限で失敗し、権限付き再実行で通過。npm run testはMissing script: "test"で失敗。新規ライブラリ・testスクリプトは追加していない。
+- UI模擬検証は日本語文字列のパイプ転送で一度失敗し、検証文字列をUnicode表記へ変更して通過。
+- 未確認：実ブラウザー操作、SW更新・Cache Storage、実時間経過での警告、実通信の確率分布。実装・自動検証は完了、実ブラウザー確認を含む最終完了判定は保留。
+- 手動確認：node server/mock-api.jsとnpm run devを起動し、SW更新・制御を確認。4 API×3戦略で一覧・詳細を取得。Network Firstで通信条件を変更し、低速取得中のAPI切り替えで旧応答が現れないことを確認。Cache Storageの保存時刻を期限超過にし、Freshness Awareで同じURLへの通信を失敗させ、一覧・詳細の警告を確認。正常な再取得で警告が解除されることも確認する。
+- api-custom・実験ログ・CSV・キャッシュ初期化・予備実験・Step 10は未実装。
+
+## Step 10（2026-11-13）
+- 変更：src/metrics/logger.js（新規）、src/app.js、public/sw.js、PROJECT_STATUS.md。Step 9のAPI選択・分類・詳細ルートを維持。ライブラリ追加なし。
+- logger.jsのrecordLog()で配列へ記録し、getLogs()でコピーを参照する。startMeasurement()で測定開始時のAPI・戦略・通信条件を固定し、操作ごとに1件記録。ページ再読み込みでログは消える。
+- 項目：timestamp、apiPath、requestType、strategy、condition、durationMs、outcome、responseStatus、responseSource、cacheAgeSec、maxStalenessSec、stalenessViolation、error。
+- timestampは操作開始時のISO日時。apiPathはクエリなしの要求pathname（詳細はIDを含む）。requestTypeはlist / detail。durationMsはperformance.now()による操作開始〜DOM更新完了で、実描画時間ではない。discardedでは破棄を検出した時点までの時間。
+- SWは返却経路ごとにX-Response-Sourceをnetwork / cache / cache-fallbackに設定する。保存前の応答・保存関数・戦略判断は変更しない。計測用取得元ヘッダーはキャッシュへ保存しない。
+- outcomeはsuccess / failure / discarded。通信失敗後もキャッシュを表示できればsuccessかつcache-fallback。キャッシュ優先で通信せず表示した場合はcache。最終HTTP応答がない場合はresponseStatus=null、responseSource=none。errorは最終表示失敗の内容で、正常なフォールバック時はnull。
+- 鮮度違反は全3戦略共通で、実際に表示したキャッシュ応答のX-Cache-Saved-AtとDOM更新完了時の時刻から計算する。cacheAgeSec > maxStalenessSecをtrue、境界はfalse。保存時刻不明・不正・未来はnull。Console・警告・X-Cache-Staleは判定根拠にしない。
+- ネットワーク成功はcacheAgeSec=null、stalenessViolation=false。失敗・discardedは表示したキャッシュがないため両方null。取得元ヘッダーがない旧SW応答はnoneとし、鮮度違反を推測しない。
+- 模擬統合検証148件：4 API×3戦略の一覧・詳細、normal / severe、キャッシュ有無、通信例外・500・503・404、DOM更新後の時間計測、期限超過・保存時刻不明・境界・DOM更新中の期限超過、切り替え前の成功／失敗応答と詳細のdiscarded、ログコピーの独立性、保存失敗時のネットワーク応答維持が通過。
+- 実HTTP検証21件：Emergencyの一覧・詳細で3戦略のnormal / severe、API停止後のキャッシュ利用・フォールバック・未保存時の失敗を確認。severeは検証用乱数を固定して成功経路を確認し、503分岐は模擬統合検証で確認。HTTP検証はSWとログ関数をNodeで接続したもので、実ブラウザー検証ではない。検証用サーバーは終了済み。
+- 検証コードは警告要素の取り違えと、HTTP応答ストリームの簡易保存方式で一度ずつ失敗。要素選択と、本文を読み切って保存する検証用Cache Storageを修正し再検証通過。
+- Viteビルド成功（初回はサンドボックスの設定読込制限で失敗、権限付き再実行で通過）。構文・差分チェック通過。npm run testは既存のMissing script: "test"で失敗。Vitestやtestスクリプトは追加していない。
+- 未確認：実ブラウザーでのSW更新、画面操作、Cache Storageの永続化を含む実環境でのログ照合。実装・自動検証は完了し、実ブラウザー確認は保留。
+- 手動確認：APIとViteを起動し、SW更新・制御を確認して一覧・詳細を取得。開発者ツールのConsoleで const { getLogs } = await import('/src/metrics/logger.js'); console.table(getLogs()); を実行して確認する。Network Firstでnormal / severeを試し、API停止後に同一URLの保存済みデータがsuccess / cache-fallbackになること、未保存URLがfailureになることを確認。Cache FirstとFreshness Awareは通信なしの命中がcacheになることを確認。低速取得中のAPI・戦略切り替えではdiscardedが記録されることを確認する。
+- CSV出力、キャッシュ経過時間の操作、api-custom、予備実験・本実験は未実装。Step 11には進んでいない。
+
 ## 次にやること
-- Step 7・8の実装・模擬検証・ビルド確認まで完了。次はブラウザーでSW更新後にプルダウンから各戦略を選び、一覧・詳細での切り替えとStep 7の鮮度判定・警告表示を確認する。Step 9以降は未着手。
+- Step 10の実装・ビルド・実HTTP・模擬検証まで完了。次は実ブラウザーで4 API×3戦略の表示・警告とログを照合する。Step 11のCSV出力は次の明示的な依頼まで着手しない。
 - Step 6〜12の順序と目的はユーザー指定の計画として記録済み（2026-10-09）。実装は依頼されたStepまでとする。
 - Vitest導入・testスクリプト整備は別途承認が必要。
 
@@ -87,8 +116,8 @@
 6. Network First実装：実装・模擬検証・起動確認済み。ネットワーク失敗時のフォールバック確認済み（ユーザー報告）。
 7. Freshness Aware実装：実装・模擬検証・ビルド確認済み。実ブラウザーでの動作確認待ち。
 8. 戦略切り替え機能：既存プルダウンで3戦略を選択する実装・模擬検証・ビルド確認済み。実ブラウザーでの動作確認待ち。
-9. api-custom実装：API種別ごとに戦略を変える本命方式を実装する（未着手）。
-10. 実験ログ記録：表示時間、成功、取得元、鮮度違反を記録する。`src/metrics/logger.js` に配置する（未着手）。
+9. API種別ごとの取得処理の整理：4分類・一覧と詳細の分離・API選択・URLに基づく許容鮮度表示を実装済み。実ブラウザー確認待ち。api-customは含めない。
+10. 実験ログ記録：`src/metrics/logger.js` に配列保持・記録・参照を実装済み。DOM更新までの時間、成功／失敗／破棄、取得元、保存時刻に基づく鮮度違反を記録。自動検証済み、実ブラウザー確認待ち。
 11. CSV出力：実験結果を卒論で集計できる形にする。`src/metrics/exportCsv.js` に配置する（未着手）。
 12. 実験条件リセット機能：キャッシュ削除など、測定条件をそろえる（未着手）。
 

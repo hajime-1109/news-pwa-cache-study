@@ -1,8 +1,9 @@
 import { API_MAX_STALENESS_SEC } from '../config/experimentConfig.js';
 
 export function getMaxStalenessSec(pathname) {
-  const apiPath = /^\/api\/articles\/[^/]+$/.test(pathname)
-    ? '/api/articles'
+  const detailMatch = /^(\/api\/(?:emergency|important|articles|static-info))\/[^/]+$/.exec(pathname);
+  const apiPath = detailMatch
+    ? detailMatch[1]
     : pathname;
   return Object.hasOwn(API_MAX_STALENESS_SEC, apiPath)
     ? API_MAX_STALENESS_SEC[apiPath]

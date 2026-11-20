@@ -1,11 +1,15 @@
+import { getMaxStalenessSec } from './cache/stalenessPolicy.js';
+import { startMeasurement } from './metrics/logger.js';
+
 export function initApp() {
   const fetchButton = document.getElementById('fetch-news');
   const conditionSelect = document.getElementById('condition');
   const strategySelect = document.getElementById('strategy');
+  const apiSelect = document.getElementById('api-type');
   const newsList = document.getElementById('news-list');
   const articleDetail = document.getElementById('article-detail');
 
-  if (!fetchButton || !conditionSelect || !strategySelect || !newsList || !articleDetail) {
+  if (!fetchButton || !conditionSelect || !strategySelect || !apiSelect || !newsList || !articleDetail) {
     throw new Error('記事表示に必要なHTML要素が見つかりません。');
   }
 
@@ -23,11 +27,20 @@ export function initApp() {
     articleDetail.replaceChildren();
   });
 
-  function fetchWithStrategy(url) {
+  apiSelect.addEventListener('change', () => {
+    // API切り替え前の一覧・詳細応答は表示しない。
+    detailRequestId += 1;
+    listRequestId += 1;
+    fetchButton.disabled = false;
+    newsList.replaceChildren();
+    articleDetail.replaceChildren();
+  });
+
+  function fetchWithStrategy(url, strategy) {
     if (!navigator.serviceWorker?.controller) {
       throw new Error('Service Worker not ready');
     }
-    return fetch(url, { headers: { 'X-Cache-Strategy': strategySelect.value } });
+    return fetch(url, { headers: { 'X-Cache-Strategy': strategy } });
   }
 
   function showStaleWarning(container, response) {
@@ -38,7 +51,7 @@ export function initApp() {
     container.prepend(warning);
   }
 
-  function showDetail(article) {
+  function showDetail(article, url) {
     const title = document.createElement('h2');
     title.textContent = article.title;
 
@@ -46,7 +59,7 @@ export function initApp() {
     const fields = [
       ['カテゴリ', article.category],
       ['更新日時', article.updatedAt],
-      ['鮮度の許容時間', `${article.maxStalenessSec} 秒`],
+      ['鮮度の許容時間', `${getMaxStalenessSec(new URL(url, location.href).pathname)} 秒`],
     ];
 
     for (const [label, value] of fields) {
@@ -63,31 +76,48 @@ export function initApp() {
     articleDetail.replaceChildren(title, metadata, body);
   }
 
-  async function fetchDetail(id) {
-    const requestId = ++detailRequestId;
+  async function fetchDetail(id, apiPath) {
+    const strategy = strategySelect.value;
     const condition = conditionSelect.value;
+    const pathname = `${apiPath}/${encodeURIComponent(id)}`;
+    const finish = startMeasurement({ apiPath: pathname, requestType: 'detail', strategy, condition });
+    let response;
+    let outcome = 'failure';
+    let requestError = null;
+    const requestId = ++detailRequestId;
+    const url = `${pathname}?condition=${encodeURIComponent(condition)}`;
     articleDetail.textContent = '記事詳細を取得中です…';
 
     try {
-      const response = await fetchWithStrategy(`/api/articles/${encodeURIComponent(id)}?condition=${encodeURIComponent(condition)}`);
+      response = await fetchWithStrategy(url, strategy);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
       const article = await response.json();
       if (requestId !== detailRequestId) return;
-      showDetail(article);
+      showDetail(article, url);
       showStaleWarning(articleDetail, response);
-    } catch {
+      outcome = 'success';
+    } catch (error) {
+      requestError = error;
       if (requestId !== detailRequestId) return;
       articleDetail.textContent = !navigator.serviceWorker?.controller
         ? 'キャッシュ戦略の準備ができていません。少し待って再取得するか、ページを再読み込みしてください。'
         : '記事詳細を取得できませんでした。APIサーバーと通信条件を確認し、もう一度記事をクリックしてください。';
+    } finally {
+      finish(requestId !== detailRequestId ? 'discarded' : outcome, response, requestError);
     }
   }
 
   fetchButton.addEventListener('click', async () => {
-    const requestId = ++listRequestId;
+    const strategy = strategySelect.value;
     const condition = conditionSelect.value;
+    const apiPath = apiSelect.value;
+    const finish = startMeasurement({ apiPath, requestType: 'list', strategy, condition });
+    let response;
+    let outcome = 'failure';
+    let requestError = null;
+    const requestId = ++listRequestId;
     // 一覧の再取得前に始まった詳細応答は表示しない。
     detailRequestId += 1;
     fetchButton.disabled = true;
@@ -95,7 +125,7 @@ export function initApp() {
     articleDetail.replaceChildren();
 
     try {
-      const response = await fetchWithStrategy(`/api/articles?condition=${encodeURIComponent(condition)}`);
+      response = await fetchWithStrategy(`${apiPath}?condition=${encodeURIComponent(condition)}`, strategy);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -111,20 +141,23 @@ export function initApp() {
         const button = document.createElement('button');
         button.type = 'button';
         button.textContent = article.title;
-        button.addEventListener('click', () => fetchDetail(article.id));
+        button.addEventListener('click', () => fetchDetail(article.id, apiPath));
         item.append(button);
         list.append(item);
       }
 
       newsList.replaceChildren(list);
       showStaleWarning(newsList, response);
-    } catch {
+      outcome = 'success';
+    } catch (error) {
+      requestError = error;
       if (requestId !== listRequestId) return;
       newsList.textContent = !navigator.serviceWorker?.controller
         ? 'キャッシュ戦略の準備ができていません。少し待って再取得するか、ページを再読み込みしてください。'
         : 'ニュースを取得できませんでした。APIサーバーと通信条件を確認し、もう一度お試しください。';
     } finally {
       if (requestId === listRequestId) fetchButton.disabled = false;
+      finish(requestId !== listRequestId ? 'discarded' : outcome, response, requestError);
     }
   });
 }

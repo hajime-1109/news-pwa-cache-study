@@ -32,6 +32,17 @@ self.addEventListener('fetch', (event) => {
 const API_CACHE_NAME = 'news-api-cache-v1';
 const SAVED_AT_HEADER = 'X-Cache-Saved-At';
 
+// Mark only the response returned to the page; never persist this metadata.
+function withResponseSource(response, source) {
+  const headers = new Headers(response.headers);
+  headers.set('X-Response-Source', source);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 async function saveResponse(cache, request, response) {
   const copy = response.clone();
   const headers = new Headers(copy.headers);
@@ -48,7 +59,7 @@ async function cacheFirst(request) {
   const cachedResponse = await cache.match(request);
   if (cachedResponse) {
     console.log('cache hit:', request.url);
-    return cachedResponse;
+    return withResponseSource(cachedResponse, 'cache');
   }
 
   console.log('network fetch:', request.url);
@@ -61,7 +72,7 @@ async function cacheFirst(request) {
       console.error('Cache save failed:', error);
     }
   }
-  return response;
+  return withResponseSource(response, 'network');
 }
 
 async function networkFirst(request) {
@@ -82,14 +93,14 @@ async function networkFirst(request) {
       // 保存失敗を通信失敗と混同せず、取得済みの記事を返す。
       console.error('Cache save failed:', error);
     }
-    return response;
+    return withResponseSource(response, 'network');
   }
 
   console.log('network failed:', request.url, response?.status ?? networkError);
   // 404などはそのまま返す。503と、API停止時のプロキシの500を含む
   // サーバーエラーではキャッシュへのフォールバックを試みる。
   if (response && response.status < 500) {
-    return response;
+    return withResponseSource(response, 'network');
   }
 
   try {
@@ -97,7 +108,7 @@ async function networkFirst(request) {
     const cachedResponse = await cache.match(request);
     if (cachedResponse) {
       console.log('fallback cache hit:', request.url);
-      return cachedResponse;
+      return withResponseSource(cachedResponse, 'cache-fallback');
     }
   } catch (error) {
     console.error('Cache read failed:', error);
@@ -105,7 +116,7 @@ async function networkFirst(request) {
 
   console.log('fallback cache miss:', request.url);
   if (response) {
-    return response;
+    return withResponseSource(response, 'network');
   }
   throw networkError;
 }
@@ -125,7 +136,7 @@ async function freshnessAware(request) {
     const freshness = judgeCacheFreshness(pathname, cachedResponse.headers.get(SAVED_AT_HEADER));
     if (freshness.isFresh) {
       console.log('freshness cache hit:', request.url, freshness);
-      return cachedResponse;
+      return withResponseSource(cachedResponse, 'cache');
     }
     console.log('freshness cache expired:', request.url, freshness);
   } else {
@@ -148,12 +159,12 @@ async function freshnessAware(request) {
     } catch (error) {
       console.error('Cache save failed:', error);
     }
-    return response;
+    return withResponseSource(response, 'network');
   }
 
   console.log('freshness network failed:', request.url, response?.status ?? networkError);
   // 404などはキャッシュで隠さない。通信エラー・503を含む5xxのみ救済する。
-  if (response && response.status < 500) return response;
+  if (response && response.status < 500) return withResponseSource(response, 'network');
 
   if (cachedResponse) {
     const freshness = judgeCacheFreshness(pathname, cachedResponse.headers.get(SAVED_AT_HEADER));
@@ -167,6 +178,7 @@ async function freshnessAware(request) {
     headers.set('X-Cache-Stale', 'true');
     headers.set('X-Cache-Age-Sec', String(freshness.cacheAgeSec ?? 'unknown'));
     headers.set('X-Cache-Max-Staleness-Sec', String(freshness.maxStalenessSec ?? 'unknown'));
+    headers.set('X-Response-Source', 'cache-fallback');
     return new Response(cachedResponse.body, {
       status: cachedResponse.status,
       statusText: cachedResponse.statusText,
@@ -174,7 +186,7 @@ async function freshnessAware(request) {
     });
   }
 
-  if (response) return response;
+  if (response) return withResponseSource(response, 'network');
   throw networkError;
 }
 

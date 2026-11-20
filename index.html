@@ -10,6 +10,14 @@
     <main>
       <h1>災害ニュース</h1>
 
+      <label for="api-type">API種別</label>
+      <select id="api-type">
+        <option value="/api/emergency">Emergency</option>
+        <option value="/api/important">Important</option>
+        <option value="/api/articles" selected>Articles</option>
+        <option value="/api/static-info">Static Info</option>
+      </select>
+
       <label for="strategy">キャッシュ戦略</label>
       <select id="strategy">
         <option value="cache-first">Cache First</option>
