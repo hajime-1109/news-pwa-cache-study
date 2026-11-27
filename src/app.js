@@ -1,4 +1,4 @@
-import { getMaxStalenessSec } from './cache/stalenessPolicy.js';
+import { getMaxStalenessSec, judgeCacheFreshness } from './cache/stalenessPolicy.js';
 import { DEFAULT_SEED, DEFAULT_TRIAL_ID } from './config/experimentConfig.js';
 import { downloadCsv } from './metrics/exportCsv.js';
 import { getLogs, startMeasurement } from './metrics/logger.js';
@@ -167,11 +167,16 @@ export function initApp() {
     });
   }
 
-  function showStaleWarning(container, response) {
-    if (response.headers.get('X-Cache-Stale') !== 'true') return;
+  function showStaleWarning(container, response, pathname) {
+    const source = response.headers.get('X-Response-Source');
+    if (source !== 'cache' && source !== 'cache-fallback') return;
+    const freshness = judgeCacheFreshness(pathname, response.headers.get('X-Cache-Saved-At'));
+    if (freshness.isFresh) return;
     const warning = document.createElement('p');
     warning.setAttribute('role', 'status');
-    warning.textContent = '注意：最新情報を取得できないため、許容鮮度を超えた、または保存時刻が不明なキャッシュを表示しています。';
+    warning.textContent = freshness.cacheAgeSec === null || freshness.maxStalenessSec === null
+      ? 'この情報の保存時刻を確認できません。最新の内容であることは確認できません。'
+      : 'この情報は保存から許容時間を超えています。最新の内容であることは確認できません。';
     container.prepend(warning);
   }
 
@@ -222,7 +227,7 @@ export function initApp() {
       const article = await response.json();
       if (requestId !== detailRequestId) return;
       showDetail(article, url);
-      showStaleWarning(articleDetail, response);
+      showStaleWarning(articleDetail, response, pathname);
       outcome = 'success';
     } catch (error) {
       requestError = error;
@@ -275,7 +280,7 @@ export function initApp() {
       }
 
       newsList.replaceChildren(list);
-      showStaleWarning(newsList, response);
+      showStaleWarning(newsList, response, apiPath);
       outcome = 'success';
     } catch (error) {
       requestError = error;
