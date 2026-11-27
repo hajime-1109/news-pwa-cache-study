@@ -17,7 +17,7 @@ import { judgeCacheFreshness } from '../cache/stalenessPolicy.js';
  * @property {number|null} maxStalenessSec
  * @property {boolean|null} stalenessViolation
  * @property {string|null} error
- * @property {'cold'|'fresh'|'expired'|null} [initialCacheState]
+ * @property {'cold'|'fresh'|'expired'|'age-30'|'age-300'|'age-1200'|'age-3600'|null} [initialCacheState]
  * @property {number|null} [configuredAgeSec]
  */
 
