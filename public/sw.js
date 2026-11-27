@@ -87,9 +87,12 @@ self.addEventListener('message', (event) => {
 async function prepareCache({ apiPath, condition, state }) {
   const maxAge = getMaxStalenessSec(apiPath);
   const ageMultiplier = { fresh: 0.5, expired: 1.5 };
+  const fixedAgeSec = { 'age-30': 30, 'age-300': 300, 'age-1200': 1200, 'age-3600': 3600 };
   if (maxAge === null || apiPath.split('/').length !== 3
       || !['normal', 'mild', 'severe', 'unstable'].includes(condition)
-      || (state !== 'cold' && !Object.hasOwn(ageMultiplier, state))) {
+      || (state !== 'cold'
+        && !Object.hasOwn(ageMultiplier, state)
+        && !Object.hasOwn(fixedAgeSec, state))) {
     throw new Error('初期化条件が不正です。');
   }
 
@@ -122,7 +125,9 @@ async function prepareCache({ apiPath, condition, state }) {
       paths.push(path);
       responses.push(response);
     }
-    const configuredAgeSec = maxAge * ageMultiplier[state];
+    const configuredAgeSec = Object.hasOwn(fixedAgeSec, state)
+      ? fixedAgeSec[state]
+      : maxAge * ageMultiplier[state];
     const cache = await caches.open(API_CACHE_NAME);
     const savedAt = Date.now() - configuredAgeSec * 1000;
     for (const [index, path] of paths.entries()) {
