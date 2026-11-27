@@ -14,6 +14,8 @@ const columns = [
   'error',
   'initialCacheState',
   'configuredAgeSec',
+  'seed',
+  'trialId',
 ];
 
 /** @param {string|number|boolean|null|undefined} value */

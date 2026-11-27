@@ -7,6 +7,8 @@ import { judgeCacheFreshness } from '../cache/stalenessPolicy.js';
  * @property {'list'|'detail'} requestType
  * @property {string} strategy
  * @property {string} condition
+ * @property {string} seed
+ * @property {string} trialId
  * @property {number} durationMs Time until DOM update, or discard detection.
  * @property {'success'|'failure'|'discarded'} outcome
  * @property {number|null} responseStatus
@@ -33,7 +35,7 @@ export function getLogs() {
 }
 
 /**
- * @param {Pick<ExperimentLog, 'apiPath'|'requestType'|'strategy'|'condition'|'initialCacheState'|'configuredAgeSec'>} context
+ * @param {Pick<ExperimentLog, 'apiPath'|'requestType'|'strategy'|'condition'|'seed'|'trialId'|'initialCacheState'|'configuredAgeSec'>} context
  */
 export function startMeasurement(context) {
   const startedAt = performance.now();

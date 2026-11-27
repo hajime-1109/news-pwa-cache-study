@@ -5,3 +5,5 @@ export const API_MAX_STALENESS_SEC = Object.freeze({
   '/api/articles': 1800,
   '/api/static-info': 86400,
 });
+export const DEFAULT_SEED = '1';
+export const DEFAULT_TRIAL_ID = '1';

@@ -1,4 +1,5 @@
 import { getMaxStalenessSec } from './cache/stalenessPolicy.js';
+import { DEFAULT_SEED, DEFAULT_TRIAL_ID } from './config/experimentConfig.js';
 import { downloadCsv } from './metrics/exportCsv.js';
 import { getLogs, startMeasurement } from './metrics/logger.js';
 
@@ -34,14 +35,27 @@ export function initApp() {
   const prepareButton = document.getElementById('prepare-cache');
   const cacheStatus = document.getElementById('cache-status');
   const conditionSelect = document.getElementById('condition');
+  const seedInput = document.getElementById('seed');
+  const trialIdInput = document.getElementById('trial-id');
   const strategySelect = document.getElementById('strategy');
   const apiSelect = document.getElementById('api-type');
   const newsList = document.getElementById('news-list');
   const articleDetail = document.getElementById('article-detail');
 
   if (!fetchButton || !exportButton || !exportStatus || !cacheStateSelect || !prepareButton || !cacheStatus
-    || !conditionSelect || !strategySelect || !apiSelect || !newsList || !articleDetail) {
+    || !conditionSelect || !seedInput || !trialIdInput
+    || !strategySelect || !apiSelect || !newsList || !articleDetail) {
     throw new Error('画面に必要なHTML要素が見つかりません。');
+  }
+
+  seedInput.value = DEFAULT_SEED;
+  trialIdInput.value = DEFAULT_TRIAL_ID;
+
+  function readTrial() {
+    return {
+      seed: seedInput.value || DEFAULT_SEED,
+      trialId: trialIdInput.value || DEFAULT_TRIAL_ID,
+    };
   }
 
   exportButton.addEventListener('click', () => {
@@ -140,11 +154,17 @@ export function initApp() {
     articleDetail.replaceChildren();
   });
 
-  function fetchWithStrategy(url, strategy) {
+  function fetchWithStrategy(url, strategy, { seed, trialId }) {
     if (!navigator.serviceWorker?.controller) {
       throw new Error('Service Worker not ready');
     }
-    return fetch(url, { headers: { 'X-Cache-Strategy': strategy } });
+    return fetch(url, {
+      headers: {
+        'X-Cache-Strategy': strategy,
+        'X-Experiment-Seed': seed,
+        'X-Experiment-Trial-Id': trialId,
+      },
+    });
   }
 
   function showStaleWarning(container, response) {
@@ -185,7 +205,8 @@ export function initApp() {
     const strategy = strategySelect.value;
     const condition = conditionSelect.value;
     const pathname = `${apiPath}/${encodeURIComponent(id)}`;
-    const finish = beginMeasurement({ apiPath: pathname, requestType: 'detail', strategy, condition });
+    const trial = readTrial();
+    const finish = beginMeasurement({ apiPath: pathname, requestType: 'detail', strategy, condition, ...trial });
     let response;
     let outcome = 'failure';
     let requestError = null;
@@ -194,7 +215,7 @@ export function initApp() {
     articleDetail.textContent = '記事詳細を取得中です…';
 
     try {
-      response = await fetchWithStrategy(url, strategy);
+      response = await fetchWithStrategy(url, strategy, trial);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -219,7 +240,8 @@ export function initApp() {
     const strategy = strategySelect.value;
     const condition = conditionSelect.value;
     const apiPath = apiSelect.value;
-    const finish = beginMeasurement({ apiPath, requestType: 'list', strategy, condition });
+    const trial = readTrial();
+    const finish = beginMeasurement({ apiPath, requestType: 'list', strategy, condition, ...trial });
     let response;
     let outcome = 'failure';
     let requestError = null;
@@ -231,7 +253,7 @@ export function initApp() {
     articleDetail.replaceChildren();
 
     try {
-      response = await fetchWithStrategy(`${apiPath}?condition=${encodeURIComponent(condition)}`, strategy);
+      response = await fetchWithStrategy(`${apiPath}?condition=${encodeURIComponent(condition)}`, strategy, trial);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }

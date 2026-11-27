@@ -1,3 +1,4 @@
+const { createHash } = require('node:crypto');
 const express = require('express');
 const articles = require('../src/data/sample-news.json');
 
@@ -22,13 +23,21 @@ function simulateCondition(req, res, next) {
     return;
   }
 
+  const seed = req.get('X-Experiment-Seed') ?? '1';
+  const trialId = req.get('X-Experiment-Trial-Id') ?? '1';
+  // Derive two samples from the trial key without shared random state.
+  const sample = createHash('sha256')
+    .update(JSON.stringify([seed, trialId, req.path, conditionName]))
+    .digest();
+  const delaySample = sample.readUInt32BE(0) / 2 ** 32;
+  const failureSample = sample.readUInt32BE(4) / 2 ** 32;
   const { minDelayMs, maxDelayMs, failureRate } = conditions[conditionName];
-  const delayMs = minDelayMs === maxDelayMs
-    ? minDelayMs
-    : minDelayMs + Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1));
+  const delayMs = minDelayMs + Math.floor(delaySample * (maxDelayMs - minDelayMs + 1));
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Simulated-Delay-Ms', String(delayMs));
 
   setTimeout(() => {
-    if (Math.random() < failureRate) {
+    if (failureSample < failureRate) {
       res.status(503).json({ error: 'Service unavailable' });
       return;
     }
